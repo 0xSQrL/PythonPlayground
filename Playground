@@ -1,0 +1,131 @@
+import cv2 as cv
+import ColorClamping
+import numpy
+import sys
+import ctypes
+
+from ctypes import *
+
+user32 = windll.user32
+
+screen_width = 1920
+screen_height = 1080
+
+def set_mouse_pos(x, y):
+    user32.SetCursorPos(x, y)
+
+
+class CameraSettings:
+    exposure = 50
+    brightness = 50
+    contrast = 50
+
+    def set_cap_settings(self, cap):
+        cap.set(cv.CAP_PROP_SATURATION, 180)
+        cap.set(cv.CAP_PROP_BRIGHTNESS, 180)
+
+
+rgb_bounds = ColorClamping.TrichromaticBound()
+
+true_img = 0
+
+
+def set_focus_color(event, x, y, flags, param):
+    if event == cv.EVENT_LBUTTONDOWN:
+        rgb_bounds.set_color(true_img[y][x][2], true_img[y][x][1], true_img[y][x][0], 10)
+        ColorClamping.update_settings_window(rgb_bounds)
+
+
+#set_mouse_pos(1920, 1080)
+
+
+cv.namedWindow("Test Window Main")
+cv.namedWindow("Test Window Real")
+ColorClamping.display_settings_window(rgb_bounds)
+cv.setMouseCallback("Test Window Real", set_focus_color)
+
+cap = cv.VideoCapture(0)
+cap.set(cv.CAP_PROP_SETTINGS, 100)
+cap.set(cv.CAP_PROP_EXPOSURE, 1)
+cursor_x = 0
+cursor_y = 0
+
+bottom_pos = (0,0)
+top_pos = (0, 0)
+
+pixel_count = 0
+
+scale_down = 1
+while True:
+    ret, true_img = cap.read()
+
+    cv.medianBlur(true_img, 9, true_img)
+
+    shrunk = cv.resize(true_img, (0, 0), None, scale_down, scale_down)
+    blue, green, red = cv.split(shrunk)
+    #numpy.empty()
+    #showme = red.copy()
+    red = ColorClamping.filter_image_to_bound(red, rgb_bounds.red)
+
+    blue = ColorClamping.filter_image_to_bound(blue, rgb_bounds.blue)
+
+    green = ColorClamping.filter_image_to_bound(green, rgb_bounds.green)
+
+    filter = cv.bitwise_and(blue, red)
+    filter = cv.bitwise_and(filter, green)
+
+    cursor_x = 0
+    cursor_y = 0
+    pixel_count = 0
+
+    cv.erode(filter, (3,3), filter)
+    cv.dilate(filter, (7,7), filter)
+
+    conts = cv.findContours(filter, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    conts = conts[1]
+    if len(conts) > 0:
+        conts = conts[0]
+        M = cv.moments(conts)
+        if M["m00"] != 0:
+            cursor_x = M["m10"] / M["m00"]
+            cursor_y = M["m01"] / M["m00"]
+
+
+    # for row, dataRow in enumerate(filter):
+    #     for col, pixel in enumerate(dataRow):
+    #         if pixel > 0:
+    #             cursor_x += col
+    #             cursor_y += row
+    #             pixel_count += 1
+    # if pixel_count > 0:
+    #     cursor_x /= pixel_count
+    #     cursor_y /= pixel_count
+
+    cv.circle(true_img, (int(cursor_x / scale_down), int(cursor_y / scale_down)), 5, (255, 0, 0))
+    cv.rectangle(true_img, (int(top_pos[0] / scale_down), int(top_pos[1] / scale_down)), (int(bottom_pos[0] / scale_down), int(bottom_pos[1] / scale_down)), (0, 255, 0))
+    print(str(cursor_x) + " " + str(cursor_y))
+
+    cv.imshow("Test Window Red", red)
+    cv.imshow("Test Window Green", green)
+    cv.imshow("Test Window Blue", blue)
+    cv.imshow("Test Window Main", filter)
+    cv.imshow("Test Window Real", true_img)
+    key = cv.waitKey(33) & 0xFF
+    if key == ord('q'):
+        break
+    elif key == ord('t'):
+        top_pos = (cursor_x, cursor_y)
+    elif key == ord('b'):
+        bottom_pos = (cursor_x, cursor_y)
+
+    if top_pos != bottom_pos and cursor_y != cursor_x != 0:
+        h_dif = top_pos[0] - bottom_pos[0]
+        cursor_x = screen_width / h_dif * (cursor_x - bottom_pos[0])
+        v_dif = top_pos[1] - bottom_pos[1]
+        cursor_y = screen_height / v_dif * (cursor_y - bottom_pos[1])
+        set_mouse_pos(int(cursor_x), int(cursor_y))
+
+
+cap.release()
+cv.destroyAllWindows()
+
